@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Business Card</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        .btn {
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+
+    <div id="card-container" class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-8 m-4 text-center">
+        <!-- A loading message will be shown here initially -->
+        <p id="loading-message" class="text-gray-500">Loading Business Card...</p>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        // PASTE THE GOOGLE SHEET 'PUBLISH TO WEB' CSV URL HERE
+        const googleSheetUrl = https://docs.google.com/spreadsheets/d/e/2PACX-1vRBaYYeD4XzWGG6w2vfFveA1hLBrPWhkfcCnnEArG3p90_COGF0VmmEFfMsRvzteuma3EhJaGYibE-A/pub?gid=0&single=true&output=csv;
+
+        // --- SCRIPT LOGIC ---
+
+        /**
+         * Fetches and parses CSV data from a URL, then converts it to a key-value object.
+         * @param {string} url - The URL of the CSV file.
+         * @returns {Promise<Object>} A promise that resolves to an object of employees, keyed by ID.
+         */
+        async function fetchEmployeeData(url) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error('Network response was not ok.');
+                }
+                const csvText = await response.text();
+                
+                // Parse the CSV text
+                const lines = csvText.trim().split('\n');
+                const headers = lines[0].split(',').map(h => h.trim());
+                const employeesArray = lines.slice(1).map(line => {
+                    const values = line.split(',').map(v => v.trim());
+                    let entry = {};
+                    headers.forEach((header, index) => {
+                        entry[header] = values[index];
+                    });
+                    return entry;
+                });
+
+                // Convert array to an object keyed by employee ID for easy lookup
+                const employeesObject = {};
+                employeesArray.forEach(employee => {
+                    if (employee.id) {
+                        employeesObject[employee.id] = employee;
+                    }
+                });
+                return employeesObject;
+
+            } catch (error) {
+                console.error("Failed to fetch or parse employee data:", error);
+                return null; // Return null on failure
+            }
+        }
+
+        /**
+         * Renders the business card HTML for a given employee.
+         * @param {HTMLElement} container - The element to inject the HTML into.
+         * @param {Object} data - The employee's data object.
+         */
+        function renderCard(container, data) {
+            document.title = `${data.name} - Digital Business Card`;
+            container.innerHTML = `
+                <div class="flex flex-col items-center text-center">
+                    <img class="w-32 h-32 rounded-full shadow-md border-4 border-white object-cover" src="${data.photoUrl}" alt="Profile Picture of ${data.name}" onerror="this.onerror=null;this.src='https://placehold.co/200x200/cccccc/ffffff?text=Error';">
+                    <h1 class="text-2xl font-bold text-gray-800 mt-4">${data.name}</h1>
+                    <p class="text-md text-gray-500">${data.title}</p>
+                </div>
+                <div class="mt-8 flex justify-center">
+                    <img class="w-48 h-48 rounded-lg shadow" src="${data.qrCodeUrl}" alt="QR Code for ${data.name}" onerror="this.onerror=null;this.src='https://placehold.co/300x300/cccccc/ffffff?text=Error';">
+                </div>
+                <div class="mt-8 grid grid-cols-1 gap-4">
+                    <a href="${data.vcfUrl}" download class="btn w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-lg text-center shadow-md hover:bg-indigo-700"><i class="fas fa-user-plus mr-2"></i> Save to Contacts</a>
+                    <a href="${data.walletUrl}" class="btn w-full bg-black text-white font-bold py-3 px-4 rounded-lg text-center shadow-md hover:bg-gray-800"><i class="fab fa-apple mr-2"></i> Add to Apple Wallet</a>
+                </div>
+            `;
+        }
+
+        /**
+         * Renders an error message in the card container.
+         * @param {HTMLElement} container - The element to inject the HTML into.
+         * @param {string} message - The error message to display.
+         */
+        function renderError(container, message) {
+            container.innerHTML = `
+                <div class="text-center">
+                    <h1 class="text-2xl font-bold text-red-600">Error</h1>
+                    <p class="text-gray-500 mt-2">${message}</p>
+                </div>
+            `;
+        }
+
+        // --- Main execution on page load ---
+        window.onload = async function() {
+            const cardContainer = document.getElementById('card-container');
+            
+            if (googleSheetUrl === 'PASTE_YOUR_GOOGLE_SHEET_CSV_URL_HERE') {
+                renderError(cardContainer, 'The application is not configured. Please set the Google Sheet URL.');
+                return;
+            }
+
+            const employees = await fetchEmployeeData(googleSheetUrl);
+
+            if (!employees) {
+                renderError(cardContainer, 'Failed to load employee data. Please try again later.');
+                return;
+            }
+
+            const params = new URLSearchParams(window.location.search);
+            const employeeId = params.get('id');
+            const employeeData = employees[employeeId];
+
+            if (employeeData) {
+                renderCard(cardContainer, employeeData);
+            } else {
+                renderError(cardContainer, 'The requested business card could not be found. Please check the URL.');
+            }
+        };
+    </script>
+</body>
+</html>
