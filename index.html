@@ -33,48 +33,65 @@
     <script>
         // --- CONFIGURATION ---
         // PASTE THE GOOGLE SHEET 'PUBLISH TO WEB' CSV URL HERE
-        const googleSheetUrl = https://docs.google.com/spreadsheets/d/e/2PACX-1vRBaYYeD4XzWGG6w2vfFveA1hLBrPWhkfcCnnEArG3p90_COGF0VmmEFfMsRvzteuma3EhJaGYibE-A/pub?gid=0&single=true&output=csv;
+        const googleSheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRBaYYeD4XzWGG6w2vfFveA1hLBrPWhkfcCnnEArG3p90_COGF0VmmEFfMsRvzteuma3EhJaGYibE-A/pub?gid=0&single=true&output=csv';
 
         // --- SCRIPT LOGIC ---
 
         /**
-         * Fetches and parses CSV data from a URL, then converts it to a key-value object.
+         * A more robust CSV parser that handles quoted fields.
+         * @param {string} csvText - The raw CSV text.
+         * @returns {Array<Object>} An array of objects representing the rows.
+         */
+        function parseCsv(csvText) {
+            const lines = csvText.trim().split('\n');
+            const headers = lines[0].split(',').map(h => h.trim());
+            const rows = [];
+
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',');
+                if (values.length !== headers.length) {
+                    console.warn(`Skipping malformed row ${i + 1}`);
+                    continue;
+                }
+                const entry = {};
+                for (let j = 0; j < headers.length; j++) {
+                    entry[headers[j]] = values[j].trim();
+                }
+                rows.push(entry);
+            }
+            return rows;
+        }
+
+        /**
+         * Fetches and parses CSV data from a URL.
          * @param {string} url - The URL of the CSV file.
          * @returns {Promise<Object>} A promise that resolves to an object of employees, keyed by ID.
          */
         async function fetchEmployeeData(url) {
-            try {
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error('Network response was not ok.');
-                }
-                const csvText = await response.text();
-                
-                // Parse the CSV text
-                const lines = csvText.trim().split('\n');
-                const headers = lines[0].split(',').map(h => h.trim());
-                const employeesArray = lines.slice(1).map(line => {
-                    const values = line.split(',').map(v => v.trim());
-                    let entry = {};
-                    headers.forEach((header, index) => {
-                        entry[header] = values[index];
-                    });
-                    return entry;
-                });
+            const employeesObject = {};
+            // Use fetch with a timeout controller
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000); // 8-second timeout
 
-                // Convert array to an object keyed by employee ID for easy lookup
-                const employeesObject = {};
-                employeesArray.forEach(employee => {
-                    if (employee.id) {
-                        employeesObject[employee.id] = employee;
-                    }
-                });
-                return employeesObject;
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
 
-            } catch (error) {
-                console.error("Failed to fetch or parse employee data:", error);
-                return null; // Return null on failure
+            if (!response.ok) {
+                throw new Error(`Network response was not ok. Status: ${response.status}`);
             }
+            
+            const csvText = await response.text();
+            if (!csvText) {
+                throw new Error("The fetched data is empty. Please check the Google Sheet.");
+            }
+            
+            const employeesArray = parseCsv(csvText);
+            employeesArray.forEach(employee => {
+                if (employee.id) {
+                    employeesObject[employee.id] = employee;
+                }
+            });
+            return employeesObject;
         }
 
         /**
@@ -101,15 +118,24 @@
         }
 
         /**
-         * Renders an error message in the card container.
+         * Renders a detailed error message in the card container.
          * @param {HTMLElement} container - The element to inject the HTML into.
-         * @param {string} message - The error message to display.
+         * @param {string} message - The primary error message.
+         * @param {Error} error - The actual error object for more details.
          */
-        function renderError(container, message) {
+        function renderError(container, message, error) {
+            console.error(message, error); // Log the full error to the console for debugging
+            let errorDetails = error ? error.message : "No additional details.";
+            if (error && error.message.includes('Failed to fetch')) {
+                errorDetails += "<br><br>This is often a CORS issue or an incorrect URL. Please ensure you are using the correct 'Publish to web' CSV link from Google Sheets."
+            }
             container.innerHTML = `
-                <div class="text-center">
-                    <h1 class="text-2xl font-bold text-red-600">Error</h1>
-                    <p class="text-gray-500 mt-2">${message}</p>
+                <div class="text-left">
+                    <h1 class="text-2xl font-bold text-red-600">An Error Occurred</h1>
+                    <p class="text-gray-600 mt-2 font-semibold">${message}</p>
+                    <div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p class="text-sm text-red-800"><strong>Details:</strong> ${errorDetails}</p>
+                    </div>
                 </div>
             `;
         }
@@ -119,25 +145,28 @@
             const cardContainer = document.getElementById('card-container');
             
             if (googleSheetUrl === 'PASTE_YOUR_GOOGLE_SHEET_CSV_URL_HERE') {
-                renderError(cardContainer, 'The application is not configured. Please set the Google Sheet URL.');
+                renderError(cardContainer, 'The application is not configured.', new Error('Please set the Google Sheet URL in the index.html file.'));
                 return;
             }
 
-            const employees = await fetchEmployeeData(googleSheetUrl);
+            try {
+                const employees = await fetchEmployeeData(googleSheetUrl);
+                const params = new URLSearchParams(window.location.search);
+                const employeeId = params.get('id');
 
-            if (!employees) {
-                renderError(cardContainer, 'Failed to load employee data. Please try again later.');
-                return;
-            }
+                if (!employeeId) {
+                    renderError(cardContainer, 'No Employee ID was provided in the URL.', new Error('Please add "?id=EMPLOYEE_ID" to the end of the URL.'));
+                    return;
+                }
 
-            const params = new URLSearchParams(window.location.search);
-            const employeeId = params.get('id');
-            const employeeData = employees[employeeId];
-
-            if (employeeData) {
-                renderCard(cardContainer, employeeData);
-            } else {
-                renderError(cardContainer, 'The requested business card could not be found. Please check the URL.');
+                const employeeData = employees[employeeId];
+                if (employeeData) {
+                    renderCard(cardContainer, employeeData);
+                } else {
+                    renderError(cardContainer, `Employee with ID "${employeeId}" could not be found.`, new Error('Please check the ID in the URL and make sure it exists in your Google Sheet.'));
+                }
+            } catch(error) {
+                renderError(cardContainer, 'Failed to load or process employee data.', error);
             }
         };
     </script>
